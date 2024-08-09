@@ -21,7 +21,8 @@
     #};
     disk.vda = {
       imageSize = "3G";
-      device = "/dev/vda";
+      #device = "/dev/vda";
+      device = "/dev/sda";
       type = "disk";
       content = {
         type = "gpt";

@@ -1,7 +1,7 @@
 # Inspirations:
 # - https://github.com/barrucadu/nixfiles/blob/1e54794479e653b139fd26806c952f28e1bddabb/shared/default.nix#L74
 
-{ self, pkgs, lib, ... }:
+{ config, pkgs, lib, ... }:
 
 {
   nixpkgs.hostPlatform = "x86_64-linux";
@@ -31,19 +31,64 @@
     "kernel.panic_on_oops" = 1;
   };
 
-  services.fail2ban = {
-    enable = true;
-    bantime-increment.enable = true;
-    bantime-increment.rndtime = "8m";
-    bantime-increment.overalljails = true;
-    ignoreIP = [ "189.110.0.0/16" ];
-  };
-
   services = {
+    fail2ban = {
+      enable = true;
+      bantime-increment.enable = true;
+      bantime-increment.rndtime = "8m";
+      bantime-increment.overalljails = true;
+      ignoreIP = [ "189.110.0.0/16" ];
+    };
+
     k3s = {
       enable = true;
       clusterInit = false;
       role = "server";
+    };
+
+    postgresql = {
+      enable = true;
+      package = pkgs.postgresql_16;
+      settings = {
+        log_connections = true;
+        log_statement = "all";
+        logging_collector = true;
+        log_disconnections = true;
+        log_destination = lib.mkForce "syslog";
+        #listen_addresses = lib.mkForce "*"; # default "localhost"
+      };
+      # With "sameuser" Postgres will allow DB user access only to databases of the same name. 
+      # E.g. DB user "mydatabase" will get access to database "mydatabase" and nothing else. 
+      # The part map=superuser_map is optional. One exception is the DB user "postgres", which 
+      # by default is a superuser/admin with access to everything. 
+      authentication = pkgs.lib.mkOverride 10 ''
+        #type database  DBuser    auth-method   auth-options
+        local sameuser  all       peer          map=superuser_map # follows identMap
+
+        #type database  DBuser   ip-address-mask      auth-method
+        host  all       all      127.0.0.1/32         md5
+        host  all       all      ::1/128              md5
+      '';
+      identMap = ''
+        #ArbitraryMapName  systemUser DBUser
+        superuser_map      root      postgres
+        superuser_map      postgres  postgres
+        # Let other names login as themselves
+        #superuser_map      /^(.*)$   \1
+      '';
+      dataDir = "/var/lib/postgresql/${config.services.postgresql.package.psqlSchema}";
+      ensureUsers = [
+        { name = "synapse"; ensureDBOwnership = true; }
+        { name = "traduzai"; ensureDBOwnership = true; }
+      ];
+      ensureDatabases = [ "synapse" "traduzai" ];
+    };
+
+    postgresqlBackup = {
+      enable = true;
+      location = "/var/backup/postgresql";
+      compression = "zstd";
+      compressionLevel = 9;
     };
   };
 
@@ -71,6 +116,7 @@
       80
       443
       4000 # for testing
+      8448 # matrix federation
 
       27015 # steam
       25565 # minecraft sushibar
